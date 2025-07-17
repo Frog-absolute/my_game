@@ -1,16 +1,10 @@
 var GAME = {
-    width: 1200,
-    height: 600,
     background: 'black',
+    resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
 }
-
-
-
-
-
-
-
-
 
 
 // Инициализация canvas
@@ -20,8 +14,8 @@ const infoElement = document.getElementById('info');
 const newGameElement = document.getElementById('newGame');
 
 // Настройка размеров canvas
-canvas.width = 800;
-canvas.height = 600;
+// canvas.width = GAME.width;
+// canvas.height = GAME.height;
 
 // Состояние игры
 let player = {
@@ -34,10 +28,27 @@ let player = {
 };
 
 let bullets = [];
+let lastShotTime = Date.now();
+const shotTimeout = 200;
+let clip = {
+    default: 30,
+    current: 0,
+    reloadingTimeout: 3000,
+    update() {
+        if (Date.now() - lastShotTime > clip.reloadingTimeout && clip.current === 0) {
+            clip.current = clip.default;
+        }
+    }
+}
 let enemies = [];
 let endOfGame = true;
-let wins = 0;
-let falls = 0;
+
+let GameResults = {
+    wins: localStorage.getItem("GameResults.wins") ?? 0,
+    falls: localStorage.getItem("GameResults.falls") ?? 0,
+
+}
+
 let keys = {
     left: false,
     right: false,
@@ -46,6 +57,8 @@ let keys = {
 
 // Класс пули
 class Bullet {
+    static shot = new Audio('./shot.mp3');
+    static hit = new Audio('./hit.mp3');
     constructor(x, y) {
         this.x = x;
         this.y = y;
@@ -56,17 +69,20 @@ class Bullet {
     }
 
     update() {
-        this.y -= this.speed;
-        if (this.y < 0) {
-            this.active = false;
-        }
-
-        // Проверка столкновений с врагами
-        for (let i = 0; i < enemies.length; i++) {
-            if (enemies[i].active && this.checkCollision(enemies[i])) {
+        for (let dy = 0; dy < this.speed; dy++) {
+            this.y--;
+            if (this.y < 0) {
                 this.active = false;
-                enemies[i].active = false;
-                break;
+            }
+
+            // Проверка столкновений с врагами
+            for (let i = 0; i < enemies.length; i++) {
+                if (enemies[i].active && this.checkCollision(enemies[i])) {
+                    this.active = false;
+                    enemies[i].active = false;
+                    Bullet.hit.play();
+                    break;
+                }
             }
         }
     }
@@ -119,7 +135,7 @@ class Enemy {
         // Проверка достижения нижней границы
         if (this.y > canvas.height - 50) {
             endOfGame = true;
-            falls++;
+            GameResults.falls++;
         }
     }
 
@@ -165,10 +181,19 @@ function destroyObjects() {
     bullets = [];
 }
 
+
+
+
+
+
+
 // Обновление информации
 function updateInfo() {
     const activeEnemies = enemies.filter(e => e.active).length;
-    infoElement.textContent = `Врагов: ${activeEnemies} | Побед: ${wins} | Поражений: ${falls}`;
+    infoElement.textContent = `Врагов: ${activeEnemies} | Побед: ${GameResults.wins} | Поражений: ${GameResults.falls}`;
+    if (!endOfGame) {
+        infoElement.textContent += '  | Патроны: ' + (clip.current || "Перезарядка " + (clip.reloadingTimeout - Date.now() + lastShotTime) / 1000)
+    }
 }
 
 
@@ -177,17 +202,24 @@ function updateInfo() {
 function initEventsListeners() {
     window.addEventListener('mousemove', onCanvasMouseMove);
     window.addEventListener('click', shot);
+    window.addEventListener('keydown', (e) => (e.code === 'Space') && shot());
+    window.addEventListener('resize', GAME.resize);
 }
 
-
 function shot() {
-    bullets.push(new Bullet(player.x + player.width / 2, player.y - 10));
+    if (Date.now() - lastShotTime > shotTimeout && clip.current > 0) {
+        bullets.push(new Bullet(player.x + player.width / 2, player.y - 10));
+        lastShotTime = Date.now();
+        clip.current--;
+        Bullet.shot.play();
+    }
+
 }
 
 function onCanvasMouseMove(event) {
     player.x = event.clientX - 0.55 * player.width;
-    if (player.x > GAME.width - player.width)
-        player.x = GAME.width - player.width;
+    if (player.x > canvas.width - player.width)
+        player.x = canvas.width - player.width;
     if (player.x < 0)
         player.x = 0;
 }
@@ -199,10 +231,43 @@ function checkGameEnd() {
     const activeEnemies = enemies.filter(e => e.active).length;
     if (activeEnemies === 0) {
         endOfGame = true;
-        wins++;
+        GameResults.wins++;
     }
 }
+function update() {
+    // Обработка ввода
+    initEventsListeners();
 
+    // Обновление пуль
+    bullets = bullets.filter(bullet => bullet.active);
+    bullets.forEach(bullet => bullet.update());
+
+    clip.update();
+
+    // Обновление врагов
+    enemies = enemies.filter(enemy => enemy.active);
+    enemies.forEach(enemy => enemy.update());
+
+    // Проверка условий окончания игры
+    checkGameEnd();
+
+    // Обновление информации 
+    updateInfo();
+}
+
+function draw() {
+    // Отрисовка игрока
+    convasContext.fillStyle = player.color;
+    convasContext.fillRect(player.x, player.y, player.width, player.height);
+
+    // Отрисовка пуль
+    bullets.forEach(bullet => bullet.draw());
+
+
+    // Отрисовка врагов
+    enemies.forEach(enemy => enemy.draw());
+
+}
 
 // Основной игровой цикл
 function play() {
@@ -211,37 +276,15 @@ function play() {
 
 
     if (!endOfGame) {
-
-        // Обработка ввода
-        initEventsListeners();
-
-        // Обновление пуль
-        bullets = bullets.filter(bullet => bullet.active);
-        bullets.forEach(bullet => bullet.update());
-
-        // Обновление врагов
-        enemies = enemies.filter(enemy => enemy.active);
-        enemies.forEach(enemy => enemy.update());
-
-        // Проверка условий окончания игры
-        checkGameEnd();
-
-        // Обновление информации 
-        updateInfo();
+        update();
+        draw();
     }
 
-    // Отрисовка игрока
-    convasContext.fillStyle = player.color;
-    convasContext.fillRect(player.x, player.y, player.width, player.height);
-
-    // Отрисовка пуль
-    bullets.forEach(bullet => bullet.draw());
-
-    // Отрисовка врагов
-    enemies.forEach(enemy => enemy.draw());
 
     // Показ экрана новой игры при окончании игры
     if (endOfGame) {
+        localStorage.setItem("GameResults.wins", GameResults.wins);
+        localStorage.setItem("GameResults.falls", GameResults.falls);
         newGameElement.style.display = 'block';
         updateInfo();
     } else {
@@ -253,14 +296,11 @@ function play() {
 
 //  Обработчики событий клавиатуры
 window.addEventListener('keydown', (e) => {
-    switch (e.key) {
+    switch (e.code) {
         case 'ArrowLeft': keys.left = true; break;
         case 'ArrowRight': keys.right = true; break;
-        case ' ': keys.space = true; break;
-        case 'g':
-        case 'G':
-        case 'п':
-        case 'П':
+        case 'Space': keys.space = true; break;
+        case 'KeyG':
             if (endOfGame) {
                 endOfGame = false;
                 createObjects();
@@ -273,10 +313,10 @@ window.addEventListener('keydown', (e) => {
 });
 
 window.addEventListener('keyup', (e) => {
-    switch (e.key) {
+    switch (e.code) {
         case 'ArrowLeft': keys.left = false; break;
         case 'ArrowRight': keys.right = false; break;
-        case ' ': keys.space = false; break;
+        case 'Space': keys.space = false; break;
     }
 });
 
@@ -288,12 +328,13 @@ newGameElement.addEventListener('click', () => {
         keys.left = false;
         keys.right = false;
         keys.space = false;
+        clip.current = clip.default;
     }
 });
 
 // Запуск игры
+GAME.resize();
 play();
 updateInfo();
 initEventsListeners();
 newGameElement.style.display = 'block';
-
